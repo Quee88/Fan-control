@@ -1,0 +1,49 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <!-- WinForms jen kvůli ikoně v oznamovací oblasti (NotifyIcon). -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AssemblyName>FanControl</AssemblyName>
+    <RootNamespace>FanControl</RootNamespace>
+    <ApplicationIcon>Assets\fan.ico</ApplicationIcon>
+    <Product>Fan Control</Product>
+    <Version>0.1.0</Version>
+    <!-- DPI nastavuje manifest, což je pro WPF správně; varování platí jen pro čisté WinForms aplikace. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <!-- Debug běží bez UAC (pro vývoj), Release vyžaduje práva správce. -->
+    <ApplicationManifest Condition="'$(Configuration)' == 'Release'">app.manifest</ApplicationManifest>
+    <ApplicationManifest Condition="'$(Configuration)' != 'Release'">app.debug.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <!-- Jeden samostatný .exe bez nutnosti instalovat .NET. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Kolize jmen s WPF (Application, MessageBox, Button…) – WinForms používáme jen plně kvalifikovaně. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\fan.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+</Project>
