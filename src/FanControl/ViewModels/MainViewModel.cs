@@ -22,7 +22,7 @@ public sealed partial class MainViewModel : ObservableObject
         _settings = settings;
 
         IsAdministrator = SystemInfo.IsAdministrator();
-        IsPawnIoInstalled = SystemInfo.IsPawnIoInstalled();
+        PawnIo = SystemInfo.GetPawnIoState();
 
         _loadingSettings = true;
         ThemeIndex = (int)settings.Current.Theme;
@@ -69,40 +69,59 @@ public sealed partial class MainViewModel : ObservableObject
     public bool ShowAdminWarning => !IsAdministrator;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowPawnIoWarning), nameof(PawnIoStatus))]
-    private bool _isPawnIoInstalled;
+    [NotifyPropertyChangedFor(nameof(ShowPawnIoWarning), nameof(CanInstallPawnIo), nameof(PawnIoStatus),
+                              nameof(PawnIoTitle), nameof(PawnIoMessage), nameof(PawnIoActionText))]
+    private PawnIoState _pawnIo;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PawnIoStatus))]
+    [NotifyCanExecuteChangedFor(nameof(InstallPawnIoCommand))]
     private bool _isInstallingPawnIo;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowPawnIoWarning))]
+    [NotifyPropertyChangedFor(nameof(ShowPawnIoWarning), nameof(CanInstallPawnIo), nameof(PawnIoStatus),
+                              nameof(PawnIoTitle), nameof(PawnIoMessage))]
     private bool _pawnIoNeedsRestart;
 
-    public bool ShowPawnIoWarning => !IsPawnIoInstalled || PawnIoNeedsRestart;
+    public bool ShowPawnIoWarning => PawnIo != PawnIoState.Ready || PawnIoNeedsRestart;
+    public bool CanInstallPawnIo => PawnIo != PawnIoState.Ready && !PawnIoNeedsRestart;
 
-    public string PawnIoStatus => IsInstallingPawnIo
-        ? "Instaluji…"
-        : PawnIoNeedsRestart ? "Nainstalováno – restartuj aplikaci"
-        : IsPawnIoInstalled ? "Nainstalováno" : "Chybí";
+    public string PawnIoStatus => IsInstallingPawnIo ? "Instaluji…"
+        : PawnIoNeedsRestart ? "Připraveno – restartuj aplikaci"
+        : PawnIo switch
+        {
+            PawnIoState.Ready => "Funguje",
+            PawnIoState.Broken => "Nainstalováno neúplně",
+            _ => "Chybí",
+        };
 
-    [RelayCommand]
+    public string PawnIoTitle => PawnIoNeedsRestart ? "Ovladač PawnIO je připravený"
+        : PawnIo == PawnIoState.Broken ? "Ovladač PawnIO nefunguje"
+        : "Chybí ovladač PawnIO";
+
+    public string PawnIoMessage => PawnIoNeedsRestart
+        ? "Aby ho aplikace začala používat, je potřeba ji restartovat."
+        : PawnIo == PawnIoState.Broken
+            ? "Ovladač je v systému, ale nainstalovaný jen napůl, takže se teplota procesoru nečte. " +
+              "Oprava ho přeinstaluje oficiálním instalátorem."
+            : "Je potřeba pro čtení teploty procesoru a řízení větráků na základní desce. Grafická karta funguje i bez něj.";
+
+    public string PawnIoActionText => PawnIo == PawnIoState.Broken ? "Opravit PawnIO" : "Nainstalovat PawnIO";
+
+    [RelayCommand(CanExecute = nameof(CanRunPawnIoInstall))]
     private async Task InstallPawnIo()
     {
         IsInstallingPawnIo = true;
-        var ok = await SystemInfo.InstallPawnIoAsync();
+        var state = await SystemInfo.InstallPawnIoAsync();
         IsInstallingPawnIo = false;
-        if (ok)
-        {
-            IsPawnIoInstalled = true;
+        PawnIo = state;
+        if (state == PawnIoState.Ready)
             PawnIoNeedsRestart = true;
-        }
         else
-        {
             SystemInfo.OpenUrl("https://pawnio.eu/");
-        }
     }
+
+    private bool CanRunPawnIoInstall() => !IsInstallingPawnIo;
 
     [RelayCommand]
     private static void RestartApp()
@@ -203,6 +222,9 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void OnDiscovered(DiscoveryResult d)
     {
+        // Vlákno hardwaru mezitím mohlo PawnIO spustit – stav ověříme znovu.
+        if (!PawnIoNeedsRestart) PawnIo = SystemInfo.GetPawnIoState();
+
         HardwareSummary = string.Join(" · ", d.Hardware
             .Where(h => h.Type is HardwareType.Motherboard or HardwareType.Cpu or HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel)
             .Select(h => h.Name.Trim())

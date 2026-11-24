@@ -15,7 +15,7 @@ Jednoduchá aplikace pro Windows na ovládání rychlosti větráků – grafick
 
 1. Stáhni `FanControl.exe` ze stránky [Releases](https://github.com/Quee88/Fan-control/releases) (jediný soubor, nic dalšího se instalovat nemusí).
 2. Spusť ho – Windows se zeptá na oprávnění správce (bez nich nejde k větrákům přistupovat).
-3. Pro teplotu procesoru a větráky na základní desce je potřeba ovladač [PawnIO](https://pawnio.eu/). Pokud chybí, aplikace ho nabídne nainstalovat jedním tlačítkem. Grafické karty NVIDIA/AMD ho nepotřebují.
+3. Pro teplotu procesoru a větráky na základní desce je potřeba ovladač [PawnIO](https://pawnio.eu/). Pokud chybí nebo je nainstalovaný jen napůl (ovladač bez zařízení – teploty CPU pak zůstávají prázdné), aplikace ho nabídne nainstalovat či opravit jedním tlačítkem. Grafické karty NVIDIA/AMD ho nepotřebují.
 
 ## Podporovaný hardware
 
