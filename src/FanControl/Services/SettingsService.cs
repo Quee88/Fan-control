@@ -11,6 +11,8 @@ public sealed class SettingsService
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
+        // Čeština v souboru čitelně („Tichý“ místo „Tichý“).
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         Converters = { new JsonStringEnumConverter() },
     };
 
@@ -41,8 +43,7 @@ public sealed class SettingsService
             Current = new AppSettings();
         }
 
-        Current.Fans ??= new();
-        Current.UpdateIntervalMs = Math.Clamp(Current.UpdateIntervalMs, 250, 5000);
+        Current.Normalize();
     }
 
     /// <summary>Uloží se zpožděním, aby tažení posuvníku nezapisovalo na disk stokrát za sekundu.</summary>

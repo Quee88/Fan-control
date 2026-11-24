@@ -7,14 +7,14 @@ namespace FanControl.Services;
 public sealed record FanRule(
     FanMode Mode,
     double ManualPercent,
-    string? SourceSensorId,
+    IReadOnlyList<string> SourceSensorIds,
     IReadOnlyList<CurvePoint> Curve,
     double Hysteresis)
 {
     public static FanRule FromSettings(FanSettings s) => new(
         s.Mode,
         s.ManualPercent,
-        s.SourceSensorId,
+        s.SourceSensorIds.ToArray(),
         s.Curve.Select(p => p.Clone()).OrderBy(p => p.Temperature).ToArray(),
         s.Hysteresis);
 }
@@ -42,6 +42,7 @@ public sealed record FanChannelState(
     float? Percent,
     float? Rpm,
     double? SourceTemperature,
+    string? SourceSensorId,
     bool IsSoftwareControlled,
     string? Problem);
 

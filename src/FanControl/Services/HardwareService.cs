@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net.NetworkInformation;
+using System.Text.RegularExpressions;
 using FanControl.Models;
 using LibreHardwareMonitor.Hardware;
 
@@ -62,6 +64,11 @@ public sealed class HardwareService : IDisposable
                     IsMotherboardEnabled = true,
                     IsControllerEnabled = true,
                     IsStorageEnabled = true,
+                    IsMemoryEnabled = true,
+                    IsNetworkEnabled = true,
+                    IsPsuEnabled = true,
+                    IsBatteryEnabled = true,
+                    IsPowerMonitorEnabled = true,
                 };
                 _computer.Open();
                 UpdateAll();
@@ -95,7 +102,10 @@ public sealed class HardwareService : IDisposable
 
                 foreach (var channel in _channels.Values)
                 {
+                    var previousProblem = channel.Problem;
                     Control(channel, dt, now);
+                    if (channel.Problem != previousProblem)
+                        Log.Info($"{channel.Info.DefaultName}: {channel.Problem ?? "řízení opět v pořádku"}");
                 }
                 snapshot = BuildSnapshot();
 
@@ -139,18 +149,20 @@ public sealed class HardwareService : IDisposable
         var channels = new List<FanChannelInfo>();
         var hardwareNames = _computer.Hardware.Select(h => new HardwareEntry(h.Name, h.HardwareType)).ToList();
 
+        var activeNics = ActiveNetworkInterfaceIds();
         foreach (var (hw, root) in all)
         {
+            // Windows hlásí desítky virtuálních adaptérů a filtrů (QoS, WFP, Wi-Fi Direct…) –
+            // ukážeme jen síťová připojení, která jsou opravdu aktivní.
+            if (root.HardwareType == HardwareType.Network && !activeNics.Contains(NicId(root))) continue;
+
             var counts = hw.Sensors.GroupBy(s => s.SensorType).Select(g => $"{g.Key}={g.Count()}");
             Log.Info($"  {hw.HardwareType} \"{hw.Name}\" ({hw.Identifier}): {string.Join(", ", counts)}");
             foreach (var s in hw.Sensors)
             {
-                if (s.SensorType is SensorType.Temperature or SensorType.Fan or SensorType.Control)
-                {
-                    var id = s.Identifier.ToString();
-                    _sensors[id] = s;
-                    sensors.Add(new SensorInfo(id, s.Name, hw.Name, root.HardwareType, s.SensorType));
-                }
+                var id = s.Identifier.ToString();
+                if (!_sensors.TryAdd(id, s)) continue;
+                sensors.Add(new SensorInfo(id, s.Name, hw.Name, root.HardwareType, s.SensorType));
             }
         }
 
@@ -183,6 +195,32 @@ public sealed class HardwareService : IDisposable
             list.Add((hw, root));
             foreach (var sub in hw.SubHardware) Collect(sub, root, list);
         }
+    }
+
+    private static HashSet<string> ActiveNetworkInterfaceIds()
+    {
+        try
+        {
+            return NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => n.OperationalStatus == OperationalStatus.Up
+                            && n.NetworkInterfaceType is not (NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel)
+                            // Instance filtrů mají v názvu příponu „-0000“.
+                            && !Regex.IsMatch(n.Name, @"-\d{4}$"))
+                .Select(n => n.Id)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Seznam síťových adaptérů nelze načíst.", ex);
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>Z identifikátoru „/nic/%7BGUID%7D“ vrátí „{GUID}“.</summary>
+    private static string NicId(IHardware hw)
+    {
+        var id = Uri.UnescapeDataString(hw.Identifier.ToString());
+        return id[(id.LastIndexOf('/') + 1)..];
     }
 
     private string? SuggestSource(IHardware root)
@@ -220,11 +258,12 @@ public sealed class HardwareService : IDisposable
     {
         if (!_rules.TryGetValue(ch.Info.Id, out var rule))
         {
-            rule = new FanRule(FanMode.Auto, 50, null, [], 0);
+            rule = new FanRule(FanMode.Auto, 50, [], [], 0);
         }
 
         ch.Problem = null;
         ch.SourceTemperature = null;
+        ch.SourceSensorId = null;
         try
         {
             double target;
@@ -236,18 +275,16 @@ public sealed class HardwareService : IDisposable
                     break;
 
                 case FanMode.Curve:
-                    float? temp = rule.SourceSensorId is not null && _sensors.TryGetValue(rule.SourceSensorId, out var src)
-                        ? src.Value
-                        : null;
-                    if (temp is null or <= 0 or > 150)
+                    if (!TryReadHottest(rule.SourceSensorIds, out var temp, out var hottestId, out var problem))
                     {
                         // Bezpečnost: bez platné teploty vracíme řízení systému.
-                        ch.Problem = "Zdrojová teplota není dostupná – řízení bylo vráceno systému.";
+                        ch.Problem = problem;
                         ReleaseToDefault(ch);
                         return;
                     }
 
                     ch.SourceTemperature = temp;
+                    ch.SourceSensorId = hottestId;
                     if (ch.HysteresisTemp is null || temp > ch.HysteresisTemp || temp <= ch.HysteresisTemp - rule.Hysteresis)
                     {
                         ch.HysteresisTemp = temp;
@@ -291,6 +328,40 @@ public sealed class HardwareService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Najde nejvyšší z vybraných teplot. Když kterákoli z nich chybí, vrací false – raději vrátíme
+    /// řízení systému, než abychom větrák řídili jen podle zbylých (třeba chladnějších) senzorů.
+    /// </summary>
+    private bool TryReadHottest(IReadOnlyList<string> ids, out double temperature, out string? hottestId, out string problem)
+    {
+        temperature = double.MinValue;
+        hottestId = null;
+        problem = "";
+        if (ids.Count == 0)
+        {
+            problem = "Není vybraná žádná teplota – řízení bylo vráceno systému.";
+            return false;
+        }
+
+        foreach (var id in ids)
+        {
+            _sensors.TryGetValue(id, out var sensor);
+            var value = sensor?.Value;
+            if (value is null or <= 0 or > 150)
+            {
+                var name = sensor is null ? "vybraná teplota" : $"{sensor.Name} ({sensor.Hardware.Name.Trim()})";
+                problem = $"Teplota {name} není dostupná – řízení bylo vráceno systému.";
+                return false;
+            }
+            if (value.Value > temperature)
+            {
+                temperature = value.Value;
+                hottestId = id;
+            }
+        }
+        return true;
+    }
+
     private static void ReleaseToDefault(ChannelRuntime ch)
     {
         ch.Output = null;
@@ -316,6 +387,7 @@ public sealed class HardwareService : IDisposable
                 ch.ControlSensor.Value,
                 ch.RpmSensor?.Value,
                 ch.SourceTemperature,
+                ch.SourceSensorId,
                 ch.IsSoftware,
                 ch.Problem);
         }
@@ -367,6 +439,7 @@ public sealed class HardwareService : IDisposable
         public TimeSpan LastApplyTime { get; set; }
         public double? HysteresisTemp { get; set; }
         public double? SourceTemperature { get; set; }
+        public string? SourceSensorId { get; set; }
         public string? Problem { get; set; }
     }
 }

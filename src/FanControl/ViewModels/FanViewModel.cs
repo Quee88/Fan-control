@@ -13,6 +13,7 @@ public sealed partial class FanViewModel : ObservableObject
 {
     private readonly FanSettings _settings;
     private readonly Action<FanViewModel> _changed;
+    private readonly bool _initialized;
 
     public FanViewModel(FanChannelInfo info, FanSettings settings, ObservableCollection<SensorOption> temperatureOptions, Action<FanViewModel> changed)
     {
@@ -21,20 +22,27 @@ public sealed partial class FanViewModel : ObservableObject
         _changed = changed;
         TemperatureOptions = temperatureOptions;
 
-        if (_settings.SourceSensorId is null || temperatureOptions.All(o => o.Id != _settings.SourceSensorId))
+        _settings.Normalize();
+
+        // Zdroje teploty: jen ty, které na tomhle PC opravdu existují; když nezbude žádný, navrhneme.
+        var sources = _settings.SourceSensorIds
+            .Select(id => temperatureOptions.FirstOrDefault(o => o.Id == id))
+            .OfType<SensorOption>()
+            .ToList();
+        if (sources.Count == 0)
         {
-            _settings.SourceSensorId = info.SuggestedSourceId ?? temperatureOptions.FirstOrDefault()?.Id;
+            var suggested = temperatureOptions.FirstOrDefault(o => o.Id == info.SuggestedSourceId) ?? temperatureOptions.FirstOrDefault();
+            if (suggested is not null) sources.Add(suggested);
         }
-        if (_settings.Curve is null || _settings.Curve.Count < 2)
-        {
-            _settings.Curve = CurvePresets.Balanced();
-        }
+        foreach (var option in sources) Sources.Add(new SourceSlotViewModel(this, option));
+        _settings.SourceSensorIds = sources.Select(o => o.Id).ToList();
+        RefreshSlots();
 
         _mode = _settings.Mode;
         _manualPercent = _settings.ManualPercent;
         _hysteresis = _settings.Hysteresis;
-        _selectedSource = temperatureOptions.FirstOrDefault(o => o.Id == _settings.SourceSensorId);
         _curvePoints = _settings.Curve;
+        _initialized = true;
         _editName = Name;
     }
 
@@ -42,6 +50,7 @@ public sealed partial class FanViewModel : ObservableObject
     public string Id => Info.Id;
     public string Name => string.IsNullOrWhiteSpace(_settings.CustomName) ? Info.DefaultName : _settings.CustomName!;
     public string HardwareName => Info.HardwareName;
+    public string? CustomName => _settings.CustomName;
     public bool IsGpu => Info.HardwareType is LibreHardwareMonitor.Hardware.HardwareType.GpuNvidia
         or LibreHardwareMonitor.Hardware.HardwareType.GpuAmd or LibreHardwareMonitor.Hardware.HardwareType.GpuIntel;
     public ObservableCollection<SensorOption> TemperatureOptions { get; }
@@ -109,13 +118,61 @@ public sealed partial class FanViewModel : ObservableObject
 
     // ---------- Křivka ----------
 
-    [ObservableProperty]
-    private SensorOption? _selectedSource;
+    /// <summary>Vybrané teploty; větrák se řídí podle nejvyšší z nich.</summary>
+    public ObservableCollection<SourceSlotViewModel> Sources { get; } = [];
 
-    partial void OnSelectedSourceChanged(SensorOption? value)
+    public bool HasMultipleSources => Sources.Count > 1;
+    public bool CanAddSource => Sources.Count < TemperatureOptions.Count;
+
+    [RelayCommand]
+    private void AddSource()
     {
-        _settings.SourceSensorId = value?.Id;
+        var used = Sources.Select(s => s.Selected?.Id).ToHashSet();
+        var next = TemperatureOptions.FirstOrDefault(o => !used.Contains(o.Id));
+        if (next is null) return;
+        Sources.Add(new SourceSlotViewModel(this, next));
+        RefreshSlots();
+        SourcesEdited();
+    }
+
+    internal void RemoveSource(SourceSlotViewModel slot)
+    {
+        if (Sources.Count <= 1) return;
+        Sources.Remove(slot);
+        RefreshSlots();
+        SourcesEdited();
+    }
+
+    internal void SourcesEdited()
+    {
+        if (!_initialized) return;
+        _settings.SourceSensorIds = Sources.Select(s => s.Selected?.Id).OfType<string>().Distinct().ToList();
         _changed(this);
+    }
+
+    private void RefreshSlots()
+    {
+        foreach (var slot in Sources) slot.CanRemove = Sources.Count > 1;
+        OnPropertyChanged(nameof(HasMultipleSources));
+        OnPropertyChanged(nameof(CanAddSource));
+    }
+
+    /// <summary>Živé hodnoty vybraných teplot – i když větrák zrovna běží v jiném režimu.</summary>
+    public void ApplyLive(IReadOnlyDictionary<string, SensorReading> sensors)
+    {
+        double? max = null;
+        SourceSlotViewModel? hottest = null;
+        foreach (var slot in Sources)
+        {
+            slot.LiveValue = slot.Selected is { } o && sensors.TryGetValue(o.Id, out var r) ? r.Value : null;
+            if (slot.LiveValue is { } v && (max is null || v > max))
+            {
+                max = v;
+                hottest = slot;
+            }
+        }
+        foreach (var slot in Sources) slot.IsHottest = HasMultipleSources && ReferenceEquals(slot, hottest);
+        LiveSourceTemperature = max;
     }
 
     [ObservableProperty]
@@ -218,4 +275,37 @@ public sealed partial class FanViewModel : ObservableObject
     /// <summary>Aktuální teplota zdroje – pro zobrazení v grafu i když větrák běží v jiném režimu.</summary>
     [ObservableProperty]
     private double? _liveSourceTemperature;
+}
+
+/// <summary>Jedna vybraná teplota v seznamu „Řídit podle“.</summary>
+public sealed partial class SourceSlotViewModel : ObservableObject
+{
+    private readonly FanViewModel _owner;
+
+    public SourceSlotViewModel(FanViewModel owner, SensorOption? selected)
+    {
+        _owner = owner;
+        _selected = selected;
+    }
+
+    public ObservableCollection<SensorOption> Options => _owner.TemperatureOptions;
+
+    [ObservableProperty]
+    private SensorOption? _selected;
+
+    partial void OnSelectedChanged(SensorOption? value) => _owner.SourcesEdited();
+
+    [ObservableProperty] private bool _canRemove;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(LiveText))]
+    private float? _liveValue;
+
+    public string LiveText => LiveValue is { } v ? $"{v:0} °C" : "—";
+
+    /// <summary>Tahle teplota je teď nejvyšší, takže podle ní větrák jede.</summary>
+    [ObservableProperty] private bool _isHottest;
+
+    [RelayCommand]
+    private void Remove() => _owner.RemoveSource(this);
 }

@@ -13,7 +13,7 @@
     <RootNamespace>FanControl</RootNamespace>
     <ApplicationIcon>Assets\fan.ico</ApplicationIcon>
     <Product>Fan Control</Product>
-    <Version>0.1.1</Version>
+    <Version>0.2.0</Version>
     <!-- DPI nastavuje manifest, což je pro WPF správně; varování platí jen pro čisté WinForms aplikace. -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
     <!-- Debug běží bez UAC (pro vývoj), Release vyžaduje práva správce. -->

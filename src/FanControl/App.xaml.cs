@@ -64,6 +64,9 @@ public partial class App : Application
 
         _tray = new TrayIcon(ShowMainWindow, () => _vm.ResetAllToAutoCommand.Execute(null), ExitApp);
         _vm.TrayTextChanged += text => _tray?.SetText(text);
+        void UpdateTrayProfiles() => _tray?.SetProfiles(_vm.ProfileMenu, _vm.SelectProfile);
+        _vm.ProfilesChanged += UpdateTrayProfiles;
+        UpdateTrayProfiles();
 
         // Pokud se aplikace přesunula, opravíme cestu v naplánované úloze.
         if (Settings.Current.StartWithWindows && SystemInfo.IsAdministrator())

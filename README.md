@@ -6,9 +6,11 @@ Jednoduchá aplikace pro Windows na ovládání rychlosti větráků – grafick
   - **Automaticky** – řízení nechá na ovladači grafické karty / BIOSu.
   - **Ručně** – pevná rychlost posuvníkem.
   - **Podle teploty** – vlastní křivka teplota → otáčky. Body se tahají myší, dvojklik přidá bod, pravé tlačítko ho smaže. Připravené předvolby *Tichý*, *Vyvážený* a *Výkonný*.
-- **Přehled senzorů** – všechny teploty a otáčky včetně minima a maxima.
+    Křivka může sledovat **víc teplot najednou** (např. GPU i CPU) – větrák se pak řídí podle nejvyšší z nich.
+- **Profily** – každý profil má vlastní nastavení všech větráků (výchozí *Normální*, *Tichý* a *Výkonný*, další jde přidat, přejmenovat i smazat). Přepínají se v okně nebo jedním kliknutím z ikony vedle hodin.
+- **Přehled senzorů** – vše, co hardware nabízí: teploty, otáčky, vytížení, frekvence, příkon, napětí, paměť, disky i síť, včetně minima a maxima a s vyhledáváním. Na hlavní stránce dlaždice s teplotou CPU a GPU, vytížením procesoru a pamětí.
 - **Běží na pozadí** v oznamovací oblasti vedle hodin; volitelně se spouští po přihlášení do Windows (bez dotazu UAC).
-- **Bezpečnost** – při ukončení, pádu aplikace nebo nedostupném senzoru teploty se větráky vždy vrátí pod řízení systému. Změny otáček jsou plynulé a hystereze brání neustálému kolísání.
+- **Bezpečnost** – při ukončení, pádu aplikace nebo nedostupném senzoru teploty (kterémkoli z vybraných) se větráky vždy vrátí pod řízení systému. Změny otáček jsou plynulé a hystereze brání neustálému kolísání.
 - Moderní vzhled Windows 11, světlý i tmavý motiv.
 
 ## Instalace
